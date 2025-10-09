@@ -7,7 +7,9 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { Bell, Lock, User, Globe, Mail, Smartphone } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { supabase } from "@/../app/supabaseClient"
+import { useToast } from "@/hooks/use-toast"
 
 export default function SettingsView() {
   const [emailNotifications, setEmailNotifications] = useState(true)
@@ -15,6 +17,143 @@ export default function SettingsView() {
   const [assignmentReminders, setAssignmentReminders] = useState(true)
   const [gradeNotifications, setGradeNotifications] = useState(true)
   const [discussionUpdates, setDiscussionUpdates] = useState(false)
+
+  // Seguridad
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [loadingSecurity, setLoadingSecurity] = useState(false)
+
+  // Datos reales del usuario
+  const [firstName, setFirstName] = useState("")
+  const [lastName, setLastName] = useState("")
+  const [email, setEmail] = useState("")
+  const [studentId, setStudentId] = useState("")
+  const [loadingUser, setLoadingUser] = useState(true)
+  const { toast } = useToast()
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        if (!supabase) {
+          setLoadingUser(false)
+          return
+        }
+        const { data: authData } = await supabase.auth.getUser()
+        const user = authData.user
+        if (!user) {
+          setLoadingUser(false)
+          return
+        }
+        const { data: profile, error } = await supabase
+          .from("users")
+          .select("full_name, id_number, email")
+          .eq("id", user.id)
+          .single()
+        if (error) {
+          console.warn("No se pudo cargar perfil desde users:", error.message)
+        }
+        const fullName = profile?.full_name || (user.user_metadata?.full_name as string) || ""
+        const parts = fullName.trim().split(/\s+/)
+        setFirstName(parts[0] || "")
+        setLastName(parts.slice(1).join(" ") || "")
+        setEmail(profile?.email || user.email || "")
+        setStudentId(profile?.id_number || (user.user_metadata?.id_number as string) || "")
+      } catch (err: any) {
+        console.error("Error cargando usuario:", err?.message || err)
+      } finally {
+        setLoadingUser(false)
+      }
+    }
+    loadUser()
+  }, [])
+
+  const handleSaveChanges = async () => {
+    try {
+      setLoadingUser(true)
+      if (!supabase) {
+        toast({ title: "Configuración requerida", description: "Faltan variables de entorno de Supabase" })
+        setLoadingUser(false)
+        return
+      }
+      const { data: authData } = await supabase.auth.getUser()
+      const user = authData.user
+      if (!user) {
+        toast({ title: "No autenticado", description: "Debes iniciar sesión" })
+        setLoadingUser(false)
+        return
+      }
+      const full_name = `${firstName} ${lastName}`.trim()
+      const { error } = await supabase
+        .from("users")
+        .update({ full_name })
+        .eq("id", user.id)
+      if (error) {
+        toast({ title: "Error al guardar", description: error.message })
+      } else {
+        toast({ title: "Cambios guardados", description: "Tu información fue actualizada" })
+      }
+    } catch (err: any) {
+      toast({ title: "Error inesperado", description: err?.message || "Intenta de nuevo" })
+    } finally {
+      setLoadingUser(false)
+    }
+  }
+
+  const handleUpdatePassword = async () => {
+    try {
+      if (!supabase) {
+        toast({ title: "Configuración requerida", description: "Faltan variables de entorno de Supabase" })
+        return
+      }
+      setLoadingSecurity(true)
+
+      if (!currentPassword || !newPassword) {
+        toast({ title: "Datos incompletos", description: "Ingresa tu contraseña actual y la nueva" })
+        setLoadingSecurity(false)
+        return
+      }
+      if (newPassword.length < 8) {
+        toast({ title: "Contraseña débil", description: "La nueva contraseña debe tener al menos 8 caracteres" })
+        setLoadingSecurity(false)
+        return
+      }
+      if (newPassword !== confirmPassword) {
+        toast({ title: "No coinciden", description: "La confirmación no coincide con la nueva contraseña" })
+        setLoadingSecurity(false)
+        return
+      }
+
+      const { data: authData } = await supabase.auth.getUser()
+      const user = authData.user
+      if (!user) {
+        toast({ title: "No autenticado", description: "Debes iniciar sesión" })
+        setLoadingSecurity(false)
+        return
+      }
+
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password: currentPassword })
+      if (signInErr) {
+        toast({ title: "Contraseña actual incorrecta", description: signInErr.message })
+        setLoadingSecurity(false)
+        return
+      }
+
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) {
+        toast({ title: "Error al actualizar", description: error.message })
+      } else {
+        toast({ title: "Contraseña actualizada", description: "Tu contraseña fue actualizada correctamente" })
+        setCurrentPassword("")
+        setNewPassword("")
+        setConfirmPassword("")
+      }
+    } catch (err: any) {
+      toast({ title: "Error inesperado", description: err?.message || "Intenta de nuevo" })
+    } finally {
+      setLoadingSecurity(false)
+    }
+  }
 
   return (
     <>
@@ -38,27 +177,24 @@ export default function SettingsView() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="firstName">First Name</Label>
-                  <Input id="firstName" defaultValue="John" />
+                  <Input id="firstName" value={firstName} onChange={(e) => setFirstName(e.target.value)} disabled={loadingUser} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="lastName">Last Name</Label>
-                  <Input id="lastName" defaultValue="Doe" />
+                  <Input id="lastName" value={lastName} onChange={(e) => setLastName(e.target.value)} disabled={loadingUser} />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" defaultValue="john.doe@unab.edu" />
+                <Input id="email" type="email" value={email} disabled />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number</Label>
-                <Input id="phone" type="tel" defaultValue="+1 (555) 123-4567" />
-              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="studentId">Student ID</Label>
-                <Input id="studentId" defaultValue="2022-CS-1234" disabled />
+                <Input id="studentId" value={studentId} disabled />
               </div>
-              <Button className="bg-[#ff9800] hover:bg-[#ff9800]/90 dark:bg-primary dark:hover:bg-primary/90">
-                Save Changes
+              <Button onClick={handleSaveChanges} className="bg-[#ff9800] hover:bg-[#ff9800]/90 dark:bg-primary dark:hover:bg-primary/90" disabled={loadingUser}>
+                {loadingUser ? "Saving..." : "Save Changes"}
               </Button>
             </CardContent>
           </Card>
@@ -75,18 +211,18 @@ export default function SettingsView() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="currentPassword">Current Password</Label>
-                <Input id="currentPassword" type="password" />
+                <Input id="currentPassword" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} disabled={loadingSecurity || !supabase} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="newPassword">New Password</Label>
-                <Input id="newPassword" type="password" />
+                <Input id="newPassword" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={loadingSecurity || !supabase} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                <Input id="confirmPassword" type="password" />
+                <Input id="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={loadingSecurity || !supabase} />
               </div>
-              <Button className="bg-[#ff9800] hover:bg-[#ff9800]/90 dark:bg-primary dark:hover:bg-primary/90">
-                Update Password
+              <Button className="bg-[#ff9800] hover:bg-[#ff9800]/90 dark:bg-primary dark:hover:bg-primary/90" onClick={handleUpdatePassword} disabled={loadingSecurity || !supabase}>
+                {loadingSecurity ? "Actualizando..." : "Update Password"}
               </Button>
             </CardContent>
           </Card>
@@ -159,46 +295,7 @@ export default function SettingsView() {
             </CardContent>
           </Card>
 
-          {/* Language & Region */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Globe className="w-5 h-5 text-[#ff9800] dark:text-primary" />
-                <CardTitle>Language & Region</CardTitle>
-              </div>
-              <CardDescription>Set your language and timezone preferences</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="language">Language</Label>
-                <select
-                  id="language"
-                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground"
-                  defaultValue="en"
-                >
-                  <option value="en">English</option>
-                  <option value="es">Español</option>
-                  <option value="fr">Français</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="timezone">Timezone</Label>
-                <select
-                  id="timezone"
-                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground"
-                  defaultValue="est"
-                >
-                  <option value="est">Eastern Time (ET)</option>
-                  <option value="cst">Central Time (CT)</option>
-                  <option value="mst">Mountain Time (MT)</option>
-                  <option value="pst">Pacific Time (PT)</option>
-                </select>
-              </div>
-              <Button className="bg-[#ff9800] hover:bg-[#ff9800]/90 dark:bg-primary dark:hover:bg-primary/90">
-                Save Preferences
-              </Button>
-            </CardContent>
-          </Card>
+
         </div>
       </div>
     </>
