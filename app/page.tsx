@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useState } from "react"
 import Link from "next/link"
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -89,8 +90,9 @@ export default function LoginPage() {
           }
         }
       }
-    } catch (err: any) {
-      toast({ title: "Error inesperado", description: err?.message ?? "Intenta de nuevo" })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Intenta de nuevo"
+      toast({ title: "Error inesperado", description: message })
     } finally {
       setIsLoading(false)
     }
@@ -101,7 +103,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-8">
         <div className="text-center space-y-4">
           <div className="space-y-2">
-            <img src="logo.png" alt="Logo UNAB" className="w-52 mx-auto"/>
+            <Image src="/logo.png" alt="Logo UNAB" width={208} height={208} className="w-52 mx-auto" priority />
           </div>
         </div>
 

@@ -8,8 +8,11 @@ import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { StudentIdModal } from "@/components/modals/student-id-modal"
+import { PostCard } from "../home/components/post-card"
+import { Skeleton } from "@/components/ui/skeleton"
+import { PostDetailModal } from "../home/components/post-detail-modal"
 
-const stats = [
+export const stats = [
   { label: "Courses Enrolled", value: "4", icon: BookOpen },
   { label: "Assignments Completed", value: "28", icon: Award },
   { label: "Average Grade", value: "88%", icon: Award },
@@ -28,8 +31,14 @@ function ProfileSharedPosts() {
 }
 
 function ProfileMyPosts() {
-  const [posts, setPosts] = React.useState<Array<{ id: string, content: string, created_at: string, media: { url: string; mime_type: string }[] }>>([])
+  const [posts, setPosts] = React.useState<Array<{ id: string; author: string; role: string; avatar: string; timestamp: string; content: string; likes: number; comments: number; media: { url: string; mime_type: string }[] }>>([])
   const [loading, setLoading] = React.useState<boolean>(false)
+  // Estado para detalle y comentarios
+  const [commentsByPostId, setCommentsByPostId] = React.useState<Record<string, { id: string | number; author: string; avatar: string; timestamp: string; content: string }[]>>({})
+  const [commentTexts, setCommentTexts] = React.useState<Record<string, string>>({})
+  const [selectedPostId, setSelectedPostId] = React.useState<string | null>(null)
+  const [detailOpen, setDetailOpen] = React.useState<boolean>(false)
+  const [likedPostIds, setLikedPostIds] = React.useState<Set<string>>(new Set())
 
   React.useEffect(() => {
     const load = async () => {
@@ -37,6 +46,20 @@ function ProfileMyPosts() {
       const { supabase } = await import("@/../app/supabaseClient")
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { setLoading(false); return }
+
+      // Datos del autor para PostCard
+      let authorName = "Tú"
+      let role = ""
+      try {
+        const { data: profile } = await supabase
+          .from("users")
+          .select("full_name, career, email")
+          .eq("id", user.id)
+          .single()
+        authorName = profile?.full_name || (profile?.email ? String(profile.email).split("@")[0] : "Tú")
+        role = profile?.career || ""
+      } catch {}
+
       const { data: postRows, error } = await supabase
         .from("posts")
         .select("id, content, created_at")
@@ -48,6 +71,8 @@ function ProfileMyPosts() {
         return
       }
       const postIds = (postRows || []).map(p => p.id)
+
+      // Media por post
       let mediaByPostId: Record<string, { url: string; mime_type: string }[]> = {}
       if (postIds.length > 0) {
         const { data: mediaRows, error: mediaErr } = await supabase
@@ -57,18 +82,57 @@ function ProfileMyPosts() {
         if (mediaErr) {
           console.error("Error cargando media:", mediaErr.message)
         } else {
-          mediaByPostId = (mediaRows || []).reduce((acc: any, m: any) => {
-            const key = m.post_id
-            acc[key] = acc[key] || []
-            acc[key].push({ url: m.url, mime_type: m.mime_type })
-            return acc
-          }, {})
+          mediaByPostId = (mediaRows || []).reduce(
+            (
+              acc: Record<string, { url: string; mime_type: string }[]>,
+              m: { post_id: string | number; url: string; mime_type: string }
+            ) => {
+              const key = String(m.post_id)
+              acc[key] = acc[key] || []
+              acc[key].push({ url: m.url, mime_type: m.mime_type })
+              return acc
+            },
+            {}
+          )
         }
       }
+
+      // Conteos de likes y comentarios
+      const likesRows = postIds.length > 0 ? (await supabase
+        .from("post_likes")
+        .select("post_id, user_id")
+        .in("post_id", postIds)).data || [] : []
+      const commentsRows = postIds.length > 0 ? (await supabase
+        .from("post_comments")
+        .select("post_id")
+        .in("post_id", postIds)).data || [] : []
+      const likesCountByPost: Record<string, number> = {}
+      const commentsCountByPost: Record<string, number> = {}
+      for (const r of (likesRows as Array<{ post_id: string | number }>)) {
+        const k = String(r.post_id)
+        likesCountByPost[k] = (likesCountByPost[k] || 0) + 1
+      }
+      for (const r of (commentsRows as Array<{ post_id: string | number }>)) {
+        const k = String(r.post_id)
+        commentsCountByPost[k] = (commentsCountByPost[k] || 0) + 1
+      }
+      const likedByMeSet = new Set<string>()
+      for (const r of (likesRows as Array<{ post_id: string | number; user_id?: string | number }>)) {
+        if (String(r.user_id) === String(user.id)) {
+          likedByMeSet.add(String(r.post_id))
+        }
+      }
+      setLikedPostIds(likedByMeSet)
+
       const mapped = (postRows || []).map(p => ({
-        id: p.id,
+        id: String(p.id),
+        author: authorName,
+        role,
+        avatar: "",
+        timestamp: formatRelativeTime(p.created_at),
         content: p.content,
-        created_at: p.created_at,
+        likes: likesCountByPost[String(p.id)] ?? 0,
+        comments: commentsCountByPost[String(p.id)] ?? 0,
         media: mediaByPostId[p.id] || [],
       }))
       setPosts(mapped)
@@ -109,50 +173,151 @@ function ProfileMyPosts() {
     }
   }
 
-  if (loading) return <div className="text-sm text-muted-foreground">Cargando...</div>
+  const loadComments = async (postId: string) => {
+    const { supabase } = await import("@/../app/supabaseClient")
+    const { data: rows, error } = await supabase
+      .from("post_comments")
+      .select("id, content, created_at, author_id")
+      .eq("post_id", postId)
+      .order("created_at", { ascending: true })
+    if (error) { console.error("Error cargando comentarios:", error.message); return }
+    const authorIds = (rows || []).map(r => r.author_id).filter(Boolean)
+    const usersMap: Record<string, { full_name?: string; email?: string; avatar_url?: string }> = {}
+    if (authorIds.length > 0) {
+      const { data: users } = await supabase
+        .from("users")
+        .select("id, full_name, email, avatar_url")
+        .in("id", authorIds)
+      for (const u of (users || [])) {
+        usersMap[String(u.id)] = { full_name: u.full_name, email: u.email ?? undefined, avatar_url: (u as { avatar_url?: string }).avatar_url }
+      }
+    }
+    const mapped = (rows || []).map((r: { id: string | number; content: string; created_at: string; author_id: string | number }) => {
+      const u = usersMap[String(r.author_id)]
+      const name = u?.full_name || (u?.email ? String(u.email).split("@")[0] : "Usuario")
+      return {
+        id: r.id,
+        author: name,
+        avatar: u?.avatar_url || "",
+        timestamp: formatRelativeTime(r.created_at),
+        content: r.content,
+      }
+    })
+    setCommentsByPostId(prev => ({ ...prev, [postId]: mapped }))
+  }
+
+  const openDetail = async (postId: string) => {
+    setSelectedPostId(postId)
+    setDetailOpen(true)
+    if (!commentsByPostId[postId]) {
+      await loadComments(postId)
+    }
+  }
+
+  const setCommentTextFor = (postId: string, v: string) => {
+    setCommentTexts(prev => ({ ...prev, [postId]: v }))
+  }
+
+  const onSubmitComment = async (postId: string, text: string) => {
+    const { supabase } = await import("@/../app/supabaseClient")
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { error } = await supabase
+      .from("post_comments")
+      .insert({ post_id: postId, author_id: user.id, content: text })
+    if (error) { console.error("Error comentando:", error.message); return }
+    setCommentTexts(prev => ({ ...prev, [postId]: "" }))
+    await loadComments(postId)
+    setPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: (p.comments || 0) + 1 } : p))
+  }
+
+  const onToggleLike = async (postId: string) => {
+    const { supabase } = await import("@/../app/supabaseClient")
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const hasLike = likedPostIds.has(postId)
+    if (hasLike) {
+      const { error } = await supabase
+        .from("post_likes")
+        .delete()
+        .eq("post_id", postId)
+        .eq("user_id", user.id)
+      if (error) { console.error("Error quitando like:", error.message) }
+      setLikedPostIds(prev => { const next = new Set(prev); next.delete(postId); return next })
+      setPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: Math.max(0, (p.likes || 0) - 1) } : p))
+    } else {
+      const { error } = await supabase
+        .from("post_likes")
+        .insert({ post_id: postId, user_id: user.id })
+      if (error) { console.error("Error dando like:", error.message) }
+      setLikedPostIds(prev => { const next = new Set(prev); next.add(postId); return next })
+      setPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: (p.likes || 0) + 1 } : p))
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="divide-y divide-border">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="py-3">
+            <div className="flex gap-3">
+              <Skeleton className="h-10 w-10 rounded-full" />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+                <Skeleton className="mt-2 h-4 w-3/4 max-w-[480px]" />
+                <Skeleton className="mt-2 h-4 w-2/3 max-w-[420px]" />
+                <div className="mt-3 inline-block max-w-[340px] md:max-w-[400px]">
+                  <Skeleton className="w-full aspect-[4/5] md:aspect-square rounded-2xl" />
+                </div>
+                <div className="mt-3 flex gap-4">
+                  <Skeleton className="h-6 w-16 rounded-full" />
+                  <Skeleton className="h-6 w-16 rounded-full" />
+                  <Skeleton className="h-6 w-16 rounded-full" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   if (posts.length === 0) return <div className="text-sm text-muted-foreground">Aún no tienes publicaciones.</div>
 
   return (
     <div className="divide-y divide-border">
       {posts.map(post => (
         <div key={post.id} className="py-3">
-          <article className="bg-card rounded-2xl border hover:border-muted shadow-sm hover:shadow-md transition-shadow p-4">
-            <div className="flex items-start justify-between mb-2">
-              <div className="text-xs text-muted-foreground">{formatRelativeTime(post.created_at)}</div>
-              <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleDeletePost(post.id)}>
-                <Trash2 className="h-4 w-4" />
-                <span className="sr-only">Eliminar</span>
-              </Button>
-            </div>
-            <p className="text-sm mb-3 whitespace-pre-wrap break-words">{post.content}</p>
-            {post.media.length > 0 && (
-              <div className="mb-3">
-                <div className="rounded-xl overflow-hidden border">
-                  {post.media.length === 1 ? (
-                    post.media[0].mime_type?.startsWith("image/") ? (
-                      <img src={post.media[0].url} alt="media" className="w-full h-auto max-h-[520px] object-contain" />
-                    ) : (
-                      <video src={post.media[0].url} controls className="w-full h-auto max-h-[520px]" />
-                    )
-                  ) : (
-                    <div className="grid grid-cols-2 gap-1">
-                      {post.media.map((m, idx) => (
-                        <div key={idx} className="relative">
-                          {m.mime_type.startsWith("image/") ? (
-                            <img src={m.url} alt={`media-${idx}`} className="w-full h-auto max-h-[300px] object-cover" />
-                          ) : (
-                            <video src={m.url} controls className="w-full h-auto max-h-[300px] object-cover" />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </article>
+          <div className="flex items-start justify-end mb-2">
+            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleDeletePost(post.id)}>
+              <Trash2 className="h-4 w-4" />
+              <span className="sr-only">Eliminar</span>
+            </Button>
+          </div>
+          <PostCard
+            {...post}
+            likedByMe={likedPostIds.has(String(post.id))}
+            onToggleLike={onToggleLike}
+            onOpenDetail={openDetail}
+          />
         </div>
       ))}
+
+      {selectedPostId && (
+        <PostDetailModal
+          open={detailOpen}
+          onOpenChange={setDetailOpen}
+          post={posts.find(p => String(p.id) === String(selectedPostId))}
+          commentsList={commentsByPostId[String(selectedPostId)] || []}
+          commentText={commentTexts[String(selectedPostId)] || ""}
+          setCommentText={(v) => setCommentTextFor(String(selectedPostId), v)}
+          onSubmitComment={(pid, txt) => onSubmitComment(pid, txt)}
+          onToggleLike={(pid) => onToggleLike(pid)}
+        />
+      )}
     </div>
   )
 }

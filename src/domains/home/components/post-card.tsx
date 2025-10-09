@@ -3,7 +3,8 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Plus, Sparkles, Heart, MessageCircle, Share2, Bookmark, MoreHorizontal } from "lucide-react"
+import { Heart, MessageCircle, Share2, Bookmark, MoreHorizontal } from "lucide-react"
+import Image from "next/image"
 
 export interface PostCardProps {
   id: string
@@ -18,15 +19,16 @@ export interface PostCardProps {
   likedByMe?: boolean
   onToggleLike?: (postId: string) => void
   onShare?: (postId: string) => void
-  onToggleComment?: (postId: string) => void
   onSubmitComment?: (postId: string, text: string) => void
+  onToggleComment?: (postId: string) => void
   commentOpen?: boolean
   commentText?: string
   setCommentText?: (v: string) => void
-  commentsList?: { id: any; author: string; avatar: string; timestamp: string; content: string }[]
+  commentsList?: { id: string | number; author: string; avatar: string; timestamp: string; content: string }[]
+  onOpenDetail?: (postId: string) => void
 }
 
-export function PostCard({ id, author, role, avatar, timestamp, content, likes, comments, media = [], likedByMe, onToggleLike, onShare, onToggleComment, onSubmitComment, commentOpen, commentText = "", setCommentText, commentsList = [] }: PostCardProps) {
+export function PostCard({ id, author, role, avatar, timestamp, content, likes, comments, media = [], likedByMe, onToggleLike, onShare, onSubmitComment, onToggleComment, commentOpen, commentText = "", setCommentText, commentsList = [], onOpenDetail }: PostCardProps) {
   return (
     <article className="bg-card rounded-2xl border hover:border-muted shadow-sm hover:shadow-md transition-shadow p-4 mb-0">
       <div className="flex gap-3">
@@ -54,25 +56,48 @@ export function PostCard({ id, author, role, avatar, timestamp, content, likes, 
             </Button>
           </div>
 
-          <p className="text-sm leading-relaxed mb-3">{content}</p>
+          <p
+            className="text-sm leading-relaxed mb-3 cursor-pointer"
+            onClick={() => onOpenDetail && onOpenDetail(id)}
+          >
+            {content}
+          </p>
 
           {media.length > 0 && (
             <div className="mb-3">
-              <div className="rounded-xl overflow-hidden border">
+              <div
+                className="inline-block rounded-2xl overflow-hidden border cursor-pointer max-w-[340px] md:max-w-[400px]"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenDetail && onOpenDetail(id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && onOpenDetail) { onOpenDetail(id) } }}
+              >
                 {media.length === 1 ? (
               media[0].mime_type?.startsWith("image/") ? (
-                <img src={media[0].url} alt="media-0" className="w-full h-auto max-h-[520px] object-contain" />
+                <div className="w-full max-w-[340px] md:max-w-[400px]">
+                  <div className="aspect-[4/5] md:aspect-square relative">
+                    <Image src={media[0].url} alt="media-0" fill sizes="(max-width: 768px) 340px, 400px" className="object-cover" />
+                  </div>
+                </div>
               ) : (
-                <video src={media[0].url} controls className="w-full h-auto max-h-[520px]" />
+                <div className="w-full max-w-[340px] md:max-w-[400px]">
+                  <div className="aspect-[4/5] md:aspect-square">
+                    <video src={media[0].url} controls className="w-full h-full object-cover" />
+                  </div>
+                </div>
               )
             ) : (
-              <div className="grid grid-cols-2 gap-1">
+              <div className="inline-grid grid-cols-2 gap-1 max-w-[340px] md:max-w-[400px]">
                 {media.map((m, idx) => (
-                  <div key={idx} className="relative">
+                  <div key={idx} className="relative overflow-hidden rounded-xl">
                     {m.mime_type.startsWith("image/") ? (
-                      <img src={m.url} alt={`media-${idx}`} className="w-full h-auto max-h-[300px] object-cover" />
+                      <div className="aspect-square relative">
+                        <Image src={m.url} alt={`media-${idx}`} fill sizes="(max-width: 768px) 170px, 200px" className="object-cover" />
+                      </div>
                     ) : (
-                      <video src={m.url} controls className="w-full h-auto max-h-[300px] object-cover" />
+                      <div className="aspect-square">
+                        <video src={m.url} controls className="w-full h-full object-cover" />
+                      </div>
                     )}
                   </div>
                 ))}
@@ -83,7 +108,7 @@ export function PostCard({ id, author, role, avatar, timestamp, content, likes, 
           )}
 
           <div className="flex items-center gap-6 px-1">
-            <button className="flex items-center gap-2 text-muted-foreground hover:text-[#1d9bf0]" onClick={() => onToggleComment && onToggleComment(id)}>
+            <button className="flex items-center gap-2 text-muted-foreground hover:text-[#1d9bf0]" onClick={() => (onToggleComment ? onToggleComment(id) : (onOpenDetail && onOpenDetail(id)))}>
               <MessageCircle className="h-[18px] w-[18px]" />
               <span className="text-xs">{comments}</span>
             </button>

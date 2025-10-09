@@ -10,12 +10,25 @@ export async function POST(req: Request) {
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-    if (!url || !serviceKey) {
-      return NextResponse.json({ error: 'Server not configured' }, { status: 500 })
+    if (!url) {
+      return NextResponse.json({ error: 'Server not configured: missing URL' }, { status: 500 })
     }
 
-    const supabaseAdmin = createClient(url, serviceKey)
+    let supabaseAdmin
+    let canUseAdmin = false
+
+    if (serviceKey) {
+      supabaseAdmin = createClient(url, serviceKey)
+      canUseAdmin = true
+    } else if (anonKey) {
+      // Fallback: usar anon key para acceder a public.users (RLS debe permitir SELECT)
+      console.warn('user-profiles: SUPABASE_SERVICE_ROLE_KEY missing, using ANON key; admin lookup disabled')
+      supabaseAdmin = createClient(url, anonKey)
+    } else {
+      return NextResponse.json({ error: 'Server not configured: missing keys' }, { status: 500 })
+    }
 
     // First, try to read public profiles
     const { data: profilesRows, error: profilesErr } = await supabaseAdmin
@@ -27,6 +40,7 @@ export async function POST(req: Request) {
       // Log minimal info, don't expose sensitive details
       console.error('profilesErr', profilesErr.message)
     }
+    console.log('user-profiles: query mode', canUseAdmin ? 'service' : 'anon', { idsCount: ids.length, returned: (profilesRows || []).length })
 
     const profilesById: Record<string, { id: string; full_name?: string | null; career?: string | null; email?: string | null }> = {}
 
@@ -34,20 +48,40 @@ export async function POST(req: Request) {
       profilesById[p.id] = { id: p.id, full_name: p.full_name, career: p.career, email: p.email }
     }
 
-    // For missing ids, try to fetch email from auth via Admin API
+    // For missing ids, try to fetch email from auth via Admin API (only if service role is available)
     const missingIds = ids.filter((id) => !profilesById[id])
 
-    for (const mid of missingIds) {
-      try {
-        const { data, error } = await supabaseAdmin.auth.admin.getUserById(mid)
-        if (error) {
-          console.error('admin.getUserById error', error.message)
-          continue
+    if (canUseAdmin && missingIds.length > 0) {
+      for (const mid of missingIds) {
+        try {
+          const { data, error } = await supabaseAdmin.auth.admin.getUserById(mid)
+          if (error) {
+            console.error('admin.getUserById error', error.message)
+            continue
+          }
+          const email = data?.user?.email || null
+          profilesById[mid] = { id: mid, email }
+        } catch (e) {
+          console.error('admin.getUserById exception', e)
         }
-        const email = data?.user?.email || null
-        profilesById[mid] = { id: mid, email }
+      }
+      // Persistir en public.users los perfiles con email faltantes para evitar futuros vacíos
+      try {
+        const toUpsert = missingIds
+          .filter((mid) => !!profilesById[mid]?.email)
+          .map((mid) => ({ id: mid, email: profilesById[mid]?.email }))
+        if (toUpsert.length > 0) {
+          const { error: upErr } = await supabaseAdmin
+            .from('users')
+            .upsert(toUpsert, { onConflict: 'id' })
+          if (upErr) {
+            console.error('user-profiles: upsert missing profiles error', upErr.message)
+          } else {
+            console.log('user-profiles: upserted missing profiles', { count: toUpsert.length })
+          }
+        }
       } catch (e) {
-        console.error('admin.getUserById exception', e)
+        console.error('user-profiles: upsert exception', e)
       }
     }
 

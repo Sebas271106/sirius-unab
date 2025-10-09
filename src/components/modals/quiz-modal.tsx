@@ -44,7 +44,7 @@ export function QuizModal({ isOpen, onClose, quiz }: QuizModalProps) {
   const [currentQuestion, setCurrentQuestion] = useState(0)
   const [answers, setAnswers] = useState<Record<number, number>>({})
   const [isSubmitted, setIsSubmitted] = useState(false)
-  const [timeRemaining, setTimeRemaining] = useState(quiz.timeLimit * 60)
+  const [timeRemaining] = useState(quiz.timeLimit * 60)
 
   const handleAnswerChange = (questionId: number, answerIndex: number) => {
     setAnswers({ ...answers, [questionId]: answerIndex })

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { Bell, Lock, User, Globe, Mail, Smartphone } from "lucide-react"
+import { Bell, Lock, User, Mail, Smartphone } from "lucide-react"
 import { useEffect, useState } from "react"
 import { supabase } from "@/../app/supabaseClient"
 import { useToast } from "@/hooks/use-toast"
@@ -59,8 +59,9 @@ export default function SettingsView() {
         setLastName(parts.slice(1).join(" ") || "")
         setEmail(profile?.email || user.email || "")
         setStudentId(profile?.id_number || (user.user_metadata?.id_number as string) || "")
-      } catch (err: any) {
-        console.error("Error cargando usuario:", err?.message || err)
+      } catch (err: unknown) {
+        const e = err as { message?: string } | null
+        console.error("Error cargando usuario:", e?.message || String(err))
       } finally {
         setLoadingUser(false)
       }
@@ -93,8 +94,9 @@ export default function SettingsView() {
       } else {
         toast({ title: "Cambios guardados", description: "Tu información fue actualizada" })
       }
-    } catch (err: any) {
-      toast({ title: "Error inesperado", description: err?.message || "Intenta de nuevo" })
+    } catch (err: unknown) {
+      const e = err as { message?: string } | null
+      toast({ title: "Error inesperado", description: e?.message || "Intenta de nuevo" })
     } finally {
       setLoadingUser(false)
     }
@@ -148,8 +150,9 @@ export default function SettingsView() {
         setNewPassword("")
         setConfirmPassword("")
       }
-    } catch (err: any) {
-      toast({ title: "Error inesperado", description: err?.message || "Intenta de nuevo" })
+    } catch (err: unknown) {
+      const e = err as { message?: string } | null
+      toast({ title: "Error inesperado", description: e?.message || "Intenta de nuevo" })
     } finally {
       setLoadingSecurity(false)
     }

@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { useParams } from "next/navigation"
 import Image from "next/image"
 
 import { Card, CardContent } from "@/components/ui/card"
@@ -176,10 +175,12 @@ const upcomingEvents = [
 ]
 
 export default function CourseDetailPage() {
-  const params = useParams()
   const [activeTab, setActiveTab] = useState("dashboard")
-  const [selectedAssignment, setSelectedAssignment] = useState<any>(null)
-  const [selectedQuiz, setSelectedQuiz] = useState<any>(null)
+  type AssignmentItem = { id: number; title: string; description: string; due: string }
+  type QuizItem = { id: number; title: string; description: string; timeLimit: number }
+
+  const [selectedAssignment, setSelectedAssignment] = useState<AssignmentItem | null>(null)
+  const [selectedQuiz, setSelectedQuiz] = useState<QuizItem | null>(null)
   const [replyingTo, setReplyingTo] = useState<number | null>(null)
   const [replyText, setReplyText] = useState("")
 
@@ -187,11 +188,11 @@ export default function CourseDetailPage() {
   const upcomingTasks = assignments.filter((a) => a.status === "upcoming").length
   const completedTasks = assignments.filter((a) => a.status === "completed").length
 
-  const handleOpenSubmission = (assignment: any) => {
+  const handleOpenSubmission = (assignment: AssignmentItem) => {
     setSelectedAssignment(assignment)
   }
 
-  const handleOpenQuiz = (assignment: any) => {
+  const handleOpenQuiz = (assignment: AssignmentItem) => {
     setSelectedQuiz({
       id: assignment.id,
       title: assignment.title,

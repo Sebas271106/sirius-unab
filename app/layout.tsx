@@ -13,7 +13,7 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: "UNAB University Portal",
+  title: "Sirius UNAB",
   description: "Modern university web application",
   generator: "v0.app",
 }

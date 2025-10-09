@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import Link from "next/link";
+// Link import removed
 import { usePathname, useRouter } from "next/navigation";
 import {
   Home,
@@ -22,7 +22,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -169,10 +168,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         try {
           localStorage.removeItem("sirius_user");
         } catch {}
+        try {
+          document.cookie = "sirius_auth=; Path=/; Max-Age=0";
+        } catch {}
         setUserEmail(null);
         setUserName(null);
         setUserCareer(null);
         setUserInitials("US");
+        try {
+          router.replace("/");
+        } catch {}
       }
     });
     return () => {
@@ -180,7 +185,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         sub.subscription?.unsubscribe?.();
       } catch {}
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!userLoading && !isAuth) {
@@ -220,16 +225,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     try {
       document.cookie = "sirius_auth=; Path=/; Max-Age=0";
     } catch {}
-    router.push("/");
+    router.replace("/");
   };
 
   // Listen to cross-view event to open Post modal
   useEffect(() => {
     const listener = () => setIsPostModalOpen(true);
-    (window as any).addEventListener("sirius:openPostModal", listener as any);
+    const eventName = "sirius:openPostModal";
+    window.addEventListener(eventName, listener as EventListener);
     return () => {
       try {
-        (window as any).removeEventListener("sirius:openPostModal", listener as any);
+        window.removeEventListener(eventName, listener as EventListener);
       } catch {}
     };
   }, []);

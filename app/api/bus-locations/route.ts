@@ -28,7 +28,7 @@ export async function GET() {
     }
 
     throw new Error(`Upstream responded with status ${res.status}`)
-  } catch (err) {
+  } catch {
     // Fallback to local sample file if upstream fails
     try {
       const filePath = path.join(process.cwd(), "log.txt")
@@ -39,7 +39,7 @@ export async function GET() {
           "content-type": "application/xml; charset=utf-8",
         },
       })
-    } catch (fileErr) {
+    } catch {
       // Last-resort minimal XML so client code can handle gracefully
       const minimal = "<ArrayOfUltimoAvlViewModel></ArrayOfUltimoAvlViewModel>"
       return new NextResponse(minimal, {

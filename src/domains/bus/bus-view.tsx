@@ -1,16 +1,9 @@
 "use client"
 
-import { MapPin, Clock } from "lucide-react"
-
+import type mapboxgl from "mapbox-gl"
 import { Card, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { useEffect, useRef, useState } from "react"
 
-const routes = [
-  { id: 1, name: "Route A", status: "Active", nextArrival: "5 min" },
-  { id: 2, name: "Route B", status: "Active", nextArrival: "12 min" },
-  { id: 3, name: "Route C", status: "Inactive", nextArrival: "-" },
-]
 
 function parseBusesFromXml(xmlString: string) {
   const rootTag = '<ArrayOfUltimoAvlViewModel'
@@ -50,9 +43,9 @@ type RouteSummary = { placa: string; etaText: string; routeName?: string }
 
 export default function BusPage() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null)
-  const mapRef = useRef<any>(null)
-  const markersRef = useRef<any[]>([])
-  const [routesSummary, setRoutesSummary] = useState<RouteSummary[]>([])
+  const mapRef = useRef<mapboxgl.Map | null>(null)
+  const markersRef = useRef<mapboxgl.Marker[]>([])
+  const [, setRoutesSummary] = useState<RouteSummary[]>([])
 
   const getRouteName = (placa?: string) => {
     const p = (placa || "").toUpperCase()
@@ -68,7 +61,7 @@ export default function BusPage() {
         if (mapRef.current) return
 
         const mapboxModule = await import("mapbox-gl")
-        const mapboxgl = (mapboxModule as any).default || mapboxModule
+        const mapboxgl = (mapboxModule as typeof import("mapbox-gl")).default || (mapboxModule as typeof import("mapbox-gl"))
 
         const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN as string
         if (!token) {
@@ -103,21 +96,24 @@ export default function BusPage() {
           zoom: 13,
         })
 
-        mapRef.current.on("error", (e: any) => {
-          console.error("Mapbox error:", e?.error || e)
+        const map = mapRef.current
+        if (!map) return
+
+        map.on("error", (e: { error?: unknown }) => {
+          console.error("Mapbox error:", (e && (e as { error?: unknown }).error) || e)
         })
 
-        mapRef.current.on("load", async () => {
+        map.on("load", async () => {
           try {
-            mapRef.current.resize()
-            setTimeout(() => mapRef.current.resize(), 300)
-            await updateMarkers()
+            map.resize()
+            setTimeout(() => map.resize(), 300)
+            await updateMarkers(map)
           } catch (err) {
             console.error("Error en carga inicial de marcadores:", err)
           }
         })
 
-        const updateMarkers = async () => {
+        const updateMarkers = async (map: mapboxgl.Map) => {
           try {
             const resp = await fetch("/api/bus-locations", { cache: "no-store" })
             if (!resp.ok) {
@@ -142,7 +138,7 @@ export default function BusPage() {
               const marker = new mapboxgl.Marker()
                 .setLngLat([bus.lng, bus.lat])
                 .setPopup(popup)
-                .addTo(mapRef.current)
+                .addTo(map)
               markersRef.current.push(marker)
             })
 
@@ -165,7 +161,7 @@ export default function BusPage() {
             setRoutesSummary(ordered)
 
             if (buses.length > 0) {
-              mapRef.current.flyTo({
+              map.flyTo({
                 center: [buses[0].lng, buses[0].lat],
                 essential: true,
               })
@@ -175,7 +171,7 @@ export default function BusPage() {
           }
         }
 
-        const interval = setInterval(updateMarkers, 15000)
+        const interval = setInterval(() => updateMarkers(map), 15000)
         return () => clearInterval(interval)
       } catch (e) {
         console.error("Failed to initialize Mapbox", e)

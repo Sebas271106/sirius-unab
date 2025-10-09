@@ -9,6 +9,8 @@ import { useToast } from "@/hooks/use-toast"
 import { PostCard } from "./components/post-card"
 import { StoriesStrip } from "./components/stories-strip"
 import { Composer } from "./components/composer"
+import { PostDetailModal } from "./components/post-detail-modal"
+import { Skeleton } from "@/components/ui/skeleton"
 
 // PostCard ahora está modularizado en ./components/post-card
 const formatRelativeTime = (isoDate: string) => {
@@ -31,7 +33,9 @@ export default function HomeView() {
   const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set())
   const [openComments, setOpenComments] = useState<Set<string>>(new Set())
   const [commentTexts, setCommentTexts] = useState<Record<string, string>>({})
-  const [commentsByPostId, setCommentsByPostId] = useState<Record<string, { id: any; author: string; avatar: string; timestamp: string; content: string }[]>>({})
+  const [commentsByPostId, setCommentsByPostId] = useState<Record<string, { id: string | number; author: string; avatar: string; timestamp: string; content: string }[]>>({})
+  const [detailOpen, setDetailOpen] = useState<boolean>(false)
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null)
 
   useEffect(() => {
     const loadPosts = async () => {
@@ -45,39 +49,49 @@ export default function HomeView() {
         setLoading(false)
         return
       }
+      console.log("[HomeView] Posts obtenidos:", { count: (postsData || []).length, sample: (postsData || []).slice(0,3) })
       const authorIds = Array.from(new Set((postsData || []).map(p => p.author_id)))
-      let profilesById: Record<string, any> = {}
+      console.log("[HomeView] Author IDs para perfiles:", authorIds)
+      const profilesById: Record<string, { id: string; full_name?: string | null; career?: string | null; email?: string | null }> = {}
+
+      // 1) Intentar obtener perfiles desde API server-side (service role) para todos los autores
       if (authorIds.length > 0) {
-        const { data: profiles, error: profileErr } = await supabase
-          .from("users")
-          .select("id, full_name, career, email")
-          .in("id", authorIds)
-        if (profileErr) {
-          console.error("Error cargando perfiles:", profileErr.message)
-        } else {
-          profilesById = (profiles || []).reduce((acc: any, prof: any) => {
-            acc[prof.id] = prof
-            return acc
-          }, {})
-        }
-      }
-      // Enriquecer perfiles faltantes con la API server-side (service role)
-      const missingAuthorIds = authorIds.filter((id) => !profilesById[id])
-      if (missingAuthorIds.length > 0) {
         try {
           const res = await fetch('/api/user-profiles', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ids: missingAuthorIds })
+            body: JSON.stringify({ ids: authorIds })
           })
           if (res.ok) {
             const { profiles } = await res.json()
+            console.log("[HomeView] API perfiles recibidos:", { count: (profiles || []).length, ids: (profiles || []).map((p: { id: string })=>p.id) })
             for (const p of profiles || []) {
               profilesById[p.id] = { ...(profilesById[p.id] || {}), ...p }
             }
+          } else {
+            const txt = await res.text()
+            console.warn("[HomeView] API /api/user-profiles no OK", { status: res.status, body: txt })
           }
         } catch (e) {
-          console.error('Error enriqueciendo perfiles:', e)
+          console.error('Error obteniendo perfiles desde API:', e)
+        }
+
+        // 2) Merge adicional con lectura directa desde tabla public.users (cliente) para mejorar datos (full_name/career)
+        try {
+          const { data: profiles, error: profileErr } = await supabase
+            .from("users")
+            .select("id, full_name, career, email")
+            .in("id", authorIds)
+          if (profileErr) {
+            console.error("Error cargando perfiles:", profileErr.message)
+          } else {
+            console.log("[HomeView] Perfiles cliente recibidos:", { count: (profiles || []).length, ids: (profiles || []).map((p: { id: string })=>p.id) })
+            for (const prof of profiles || []) {
+              profilesById[prof.id] = { ...(profilesById[prof.id] || {}), ...prof }
+            }
+          }
+        } catch (e) {
+          console.error('Error leyendo perfiles en cliente:', e)
         }
       }
       // Fetch media for posts
@@ -91,26 +105,50 @@ export default function HomeView() {
         if (mediaErr) {
           console.error("Error cargando media:", mediaErr.message)
         } else {
-          mediaByPostId = (mediaRows || []).reduce((acc: any, m: any) => {
-            const key = m.post_id
+          mediaByPostId = (mediaRows || []).reduce((acc: Record<string, { url: string; mime_type: string }[]>, m: { post_id: string | number; url: string; mime_type: string }) => {
+            const key = String(m.post_id)
             acc[key] = acc[key] || []
             acc[key].push({ url: m.url, mime_type: m.mime_type })
             return acc
-          }, {})
+          }, {} as Record<string, { url: string; mime_type: string }[]>)
         }
+      }
+
+      // Calcular conteos reales de likes y comentarios
+      const likesRows = postIds.length > 0 ? (await supabase
+        .from("post_likes")
+        .select("post_id")
+        .in("post_id", postIds)).data || [] : []
+      const commentsRows = postIds.length > 0 ? (await supabase
+        .from("post_comments")
+        .select("post_id")
+        .in("post_id", postIds)).data || [] : []
+      const likesCountByPost: Record<string, number> = {}
+      const commentsCountByPost: Record<string, number> = {}
+      for (const r of likesRows as { post_id: string | number }[]) {
+        const k = String(r.post_id)
+        likesCountByPost[k] = (likesCountByPost[k] || 0) + 1
+      }
+      for (const r of commentsRows as { post_id: string | number }[]) {
+        const k = String(r.post_id)
+        commentsCountByPost[k] = (commentsCountByPost[k] || 0) + 1
       }
 
       const mapped = (postsData || []).map(p => {
         const prof = profilesById[p.author_id] || {}
+        const resolvedAuthor = prof.full_name || (prof.email ? String(prof.email).split("@")[0] : `unab-${String(p.author_id).slice(0,8)}`)
+        if (!prof.full_name && !prof.email) {
+          console.warn("[HomeView] Fallback alias en post", { post_id: p.id, author_id: p.author_id, alias: resolvedAuthor, profile: prof })
+        }
         return {
           id: String(p.id),
-          author: prof.full_name || (prof.email ? String(prof.email).split("@")[0] : "Usuario"),
+          author: resolvedAuthor,
           role: prof.career || "",
           avatar: "",
           timestamp: formatRelativeTime(p.created_at),
           content: p.content,
-          likes: p.likes_count || 0,
-          comments: p.comments_count || 0,
+          likes: likesCountByPost[String(p.id)] ?? (p.likes_count || 0),
+          comments: commentsCountByPost[String(p.id)] ?? (p.comments_count || 0),
           media: mediaByPostId[p.id] || [],
         }
       })
@@ -128,7 +166,7 @@ export default function HomeView() {
             .eq("user_id", userId)
             .in("post_id", postIds)
           
-          const likedSet = new Set<string>((likedRows || []).map((r: any) => String(r.post_id)))
+          const likedSet = new Set<string>((likedRows || []).map((r: { post_id: string | number }) => String(r.post_id)))
           setLikedPostIds(likedSet)
         }
       } catch (e) {
@@ -171,48 +209,62 @@ export default function HomeView() {
       console.error("Error cargando comentarios:", error.message)
       return
     }
+    console.log("[HomeView] Comentarios obtenidos:", { postId, count: (rows || []).length, sample: (rows || []).slice(0,3) })
     
     const authorIds = Array.from(new Set((rows || []).map(r => r.author_id)))
-    let profilesById: Record<string, any> = {}
+    console.log("[HomeView] Author IDs (comments):", authorIds)
+    const profilesById: Record<string, { id: string; full_name?: string | null; email?: string | null }> = {}
     
     if (authorIds.length > 0) {
-      const { data: profs } = await supabase
-        .from("users")
-        .select("id, full_name, email")
-        .in("id", authorIds)
-      
-      profilesById = (profs || []).reduce((acc: any, p: any) => { 
-        acc[p.id] = p
-        return acc 
-      }, {})
-    }
-    // Enriquecer perfiles faltantes con la API server-side (service role)
-    const missingIds = authorIds.filter((id) => !profilesById[id])
-    if (missingIds.length > 0) {
+      // 1) API server-side primero
       try {
         const res = await fetch('/api/user-profiles', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: missingIds })
+          body: JSON.stringify({ ids: authorIds })
         })
         if (res.ok) {
           const { profiles } = await res.json()
+          console.log("[HomeView] API perfiles (comments) recibidos:", { count: (profiles || []).length, ids: (profiles || []).map((p: { id: string })=>p.id) })
           for (const p of profiles || []) {
             profilesById[p.id] = { ...(profilesById[p.id] || {}), ...p }
           }
+        } else {
+          const txt = await res.text()
+          console.warn("[HomeView] API /api/user-profiles (comments) no OK", { status: res.status, body: txt })
         }
       } catch (e) {
-        console.error('Error enriqueciendo perfiles (comments):', e)
+        console.error('Error enriqueciendo perfiles (comments) desde API:', e)
+      }
+
+      // 2) Merge con lectura cliente de public.users para completar datos
+      try {
+        const { data: profs } = await supabase
+          .from("users")
+          .select("id, full_name, email")
+          .in("id", authorIds)
+        console.log("[HomeView] Perfiles cliente (comments) recibidos:", { count: (profs || []).length, ids: (profs || []).map((p: { id: string })=>p.id) })
+        for (const p of profs || []) {
+          profilesById[p.id] = { ...(profilesById[p.id] || {}), ...p }
+        }
+      } catch (e) {
+        console.error('Error leyendo perfiles (comments) en cliente:', e)
       }
     }
     
-    const mapped = (rows || []).map(r => ({
-      id: r.id,
-      author: profilesById[r.author_id]?.full_name || (profilesById[r.author_id]?.email ? String(profilesById[r.author_id].email).split("@")[0] : "Usuario"),
-      avatar: "",
-      timestamp: formatRelativeTime(r.created_at),
-      content: r.content,
-    }))
+    const mapped = (rows || []).map(r => {
+      const name = profilesById[r.author_id]?.full_name || (profilesById[r.author_id]?.email ? String(profilesById[r.author_id].email).split("@")[0] : `unab-${String(r.author_id).slice(0,8)}`)
+      if (!profilesById[r.author_id]?.full_name && !profilesById[r.author_id]?.email) {
+        console.warn("[HomeView] Fallback alias en comentario", { post_id: postId, comment_id: r.id, author_id: r.author_id, alias: name, profile: profilesById[r.author_id] })
+      }
+      return {
+        id: r.id,
+        author: name,
+        avatar: "",
+        timestamp: formatRelativeTime(r.created_at),
+        content: r.content,
+      }
+    })
     
     setCommentsByPostId(prev => ({ ...prev, [postId]: mapped }))
   }
@@ -224,9 +276,17 @@ export default function HomeView() {
       else next.add(postId)
       return next
     })
-    
+
     // Si se abre y no hay comentarios cargados, cargar
     if (!openComments.has(postId) && !commentsByPostId[postId]) {
+      await loadComments(postId)
+    }
+  }
+
+  const openDetail = async (postId: string) => {
+    setSelectedPostId(postId)
+    setDetailOpen(true)
+    if (!commentsByPostId[postId]) {
       await loadComments(postId)
     }
   }
@@ -329,7 +389,8 @@ export default function HomeView() {
       
       if (error) {
         // Si hay conflicto (409), tratamos como ya-likeado
-        if ((error as any).code === "409") {
+        const code = (error as { code?: string } | null)?.code
+        if (code === "409") {
           setLikedPostIds(prev => {
             const next = new Set(prev)
             next.add(postId)
@@ -362,13 +423,13 @@ export default function HomeView() {
         await navigator.clipboard.writeText(url)
         toast({ title: "Enlace copiado", description: "URL copiada al portapapeles" })
       }
-    } catch (e) {
+    } catch {
       toast({ title: "No se pudo compartir", description: "Intenta nuevamente" })
     }
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="mx-auto max-w-3xl min-h-screen">
       <div className="container">
         <main className="lg:border-x lg:border-border min-h-screen">
           {/* Tabs estilo X.com */}
@@ -392,7 +453,31 @@ export default function HomeView() {
 
           {/* Posts Feed */}
           {loading ? (
-            <div className="p-4 text-center text-muted-foreground">Cargando publicaciones...</div>
+            <div className="divide-y divide-border">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="py-3">
+                  <div className="flex gap-3">
+                    <Skeleton className="h-10 w-10 rounded-full" />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-3 w-16" />
+                      </div>
+                      <Skeleton className="mt-2 h-4 w-3/4 max-w-[480px]" />
+                      <Skeleton className="mt-2 h-4 w-2/3 max-w-[420px]" />
+                      <div className="mt-3 inline-block max-w-[340px] md:max-w-[400px]">
+                        <Skeleton className="w-full aspect-[4/5] md:aspect-square rounded-2xl" />
+                      </div>
+                      <div className="mt-3 flex gap-4">
+                        <Skeleton className="h-6 w-16 rounded-full" />
+                        <Skeleton className="h-6 w-16 rounded-full" />
+                        <Skeleton className="h-6 w-16 rounded-full" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : posts.length === 0 ? (
             <div className="p-4 text-center text-muted-foreground">No hay publicaciones aún. ¡Sé el primero!</div>
           ) : (
@@ -410,6 +495,7 @@ export default function HomeView() {
                     commentText={commentTexts[String(post.id)] || ""}
                     setCommentText={(v) => setCommentTextFor(String(post.id), v)}
                     commentsList={commentsByPostId[String(post.id)] || []}
+                    onOpenDetail={openDetail}
                   />
                 </div>
               ))}
@@ -417,6 +503,19 @@ export default function HomeView() {
           )}
         </main>
       </div>
+
+      {selectedPostId && (
+        <PostDetailModal
+          open={detailOpen}
+          onOpenChange={setDetailOpen}
+          post={posts.find(p => String(p.id) === String(selectedPostId))}
+          commentsList={commentsByPostId[String(selectedPostId)] || []}
+          commentText={commentTexts[String(selectedPostId)] || ""}
+          setCommentText={(v) => setCommentTextFor(String(selectedPostId), v)}
+          onSubmitComment={(pid, txt) => onSubmitComment(pid, txt)}
+          onToggleLike={(pid) => onToggleLike(pid)}
+        />
+      )}
 
       {/* Floating Action Button */}
       <Button

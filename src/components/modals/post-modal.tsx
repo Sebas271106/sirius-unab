@@ -1,12 +1,13 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
+import Image from "next/image"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { Upload, X, Image as ImageIcon, CheckCircle2 } from "lucide-react"
+import { Upload, X, CheckCircle2 } from "lucide-react"
 import { supabase } from "@/../app/supabaseClient"
 import { useToast } from "@/hooks/use-toast"
 
@@ -26,12 +27,17 @@ export function PostModal({ isOpen, onClose }: PostModalProps) {
   const [files, setFiles] = useState<PreviewFile[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const filesRef = useRef<PreviewFile[]>([])
+
+  useEffect(() => {
+    filesRef.current = files
+  }, [files])
 
   useEffect(() => {
     if (!isOpen) {
       // reset state when closed
       setContent("")
-      files.forEach((f) => URL.revokeObjectURL(f.url))
+      filesRef.current.forEach((f) => URL.revokeObjectURL(f.url))
       setFiles([])
       setIsSubmitting(false)
       setSubmitted(false)
@@ -55,11 +61,15 @@ export function PostModal({ isOpen, onClose }: PostModalProps) {
     })
   }
 
-  // Aspect ratio for cropping: '16:9' or '1:1'
-  const [aspect, setAspect] = useState<'1:1' | '16:9'>('16:9')
+  // Aspect ratio for cropping: '4:5' or '1:1'
+  const [aspect, setAspect] = useState<'1:1' | '4:5'>('1:1')
+  // Crop editor controls
+  const [zoom, setZoom] = useState(1)
+  const [offsetX, setOffsetX] = useState(0.5) // 0..1 (0 izquierda, 1 derecha)
+  const [offsetY, setOffsetY] = useState(0.5) // 0..1 (0 arriba, 1 abajo)
 
-  // Center crop image to the selected aspect
-  async function cropImageToAspect(file: File, aspect: '1:1' | '16:9'): Promise<File> {
+  // Center crop image to the selected aspect with zoom and offsets
+  async function cropImageToAspect(file: File, aspect: '1:1' | '4:5'): Promise<File> {
     const img = document.createElement('img')
     const objectUrl = URL.createObjectURL(file)
     img.src = objectUrl
@@ -70,36 +80,42 @@ export function PostModal({ isOpen, onClose }: PostModalProps) {
 
     const naturalW = img.naturalWidth
     const naturalH = img.naturalHeight
-    const targetRatio = aspect === '16:9' ? 16 / 9 : 1
-    const sourceRatio = naturalW / naturalH
+    const targetRatio = aspect === '4:5' ? 4 / 5 : 1
 
-    // Determine source crop rect (center crop)
-    let srcW = naturalW
-    let srcH = naturalH
-    if (sourceRatio > targetRatio) {
-      // demasiado ancho, recortamos en ancho
-      srcH = naturalH
-      srcW = Math.round(targetRatio * srcH)
+    // Determine source crop rect using offsets and zoom
+    // base crop size fitting aspect within image
+    let baseCropW: number
+    let baseCropH: number
+    if (naturalW / naturalH > targetRatio) {
+      baseCropH = naturalH
+      baseCropW = Math.round(targetRatio * baseCropH)
     } else {
-      // demasiado alto, recortamos en alto
-      srcW = naturalW
-      srcH = Math.round(srcW / targetRatio)
+      baseCropW = naturalW
+      baseCropH = Math.round(baseCropW / targetRatio)
     }
-    const srcX = Math.round((naturalW - srcW) / 2)
-    const srcY = Math.round((naturalH - srcH) / 2)
+    // apply zoom (zoom >=1). zoom 1 = fit, 2 = zoom-in x2
+    const z = Math.max(zoom, 1)
+    const cropW = Math.min(Math.round(baseCropW / z), naturalW)
+    const cropH = Math.min(Math.round(baseCropH / z), naturalH)
 
-    // Output size (limit to natural size)
-    const maxOutW = aspect === '16:9' ? 1280 : 1080
-    const scale = Math.min(maxOutW / srcW, 1) // no escalar por encima del tamaño original
-    const outW = Math.round(srcW * scale)
-    const outH = Math.round(srcH * scale)
+    // position using offsets (0..1)
+    const maxX = naturalW - cropW
+    const maxY = naturalH - cropH
+    const srcX = Math.round(maxX * Math.min(Math.max(offsetX, 0), 1))
+    const srcY = Math.round(maxY * Math.min(Math.max(offsetY, 0), 1))
+
+    // Output size (limit to common max sizes per aspect)
+    const maxOutW = aspect === '4:5' ? 1080 : 1080
+    const scale = Math.min(maxOutW / cropW, 1)
+    const outW = Math.round(cropW * scale)
+    const outH = Math.round(cropH * scale)
 
     const canvas = document.createElement('canvas')
     canvas.width = outW
     canvas.height = outH
     const ctx = canvas.getContext('2d')!
     ctx.imageSmoothingQuality = 'high'
-    ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, outW, outH)
+    ctx.drawImage(img, srcX, srcY, cropW, cropH, 0, 0, outW, outH)
 
     const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b as Blob), 'image/jpeg', 0.92))
     URL.revokeObjectURL(objectUrl)
@@ -187,9 +203,10 @@ export function PostModal({ isOpen, onClose }: PostModalProps) {
       setTimeout(() => {
         onClose()
       }, 800)
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      toast({ title: "Error al publicar", description: err?.message || "Intenta nuevamente." })
+      const message = err instanceof Error ? err.message : "Intenta nuevamente."
+      toast({ title: "Error al publicar", description: message })
     } finally {
       setIsSubmitting(false)
     }
@@ -243,17 +260,32 @@ export function PostModal({ isOpen, onClose }: PostModalProps) {
                 <>
                   <div className="mt-3 flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">Aspecto:</span>
-                    <Button type="button" size="sm" variant={aspect === '16:9' ? 'default' : 'outline'} onClick={() => setAspect('16:9')}>16:9</Button>
                     <Button type="button" size="sm" variant={aspect === '1:1' ? 'default' : 'outline'} onClick={() => setAspect('1:1')}>1:1</Button>
-                    <span className="ml-3 text-xs text-muted-foreground">(recorte centrado; pronto: zoom, reposición y filtros)</span>
+                    <Button type="button" size="sm" variant={aspect === '4:5' ? 'default' : 'outline'} onClick={() => setAspect('4:5')}>4:5</Button>
+                    <span className="ml-3 text-xs text-muted-foreground">(puedes ajustar zoom y posición antes de recortar)</span>
                   </div>
+                  <div className="mt-3 flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Zoom</span>
+                      <input type="range" min={1} max={3} step={0.01} value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Posición X</span>
+                      <input type="range" min={0} max={1} step={0.01} value={offsetX} onChange={(e) => setOffsetX(parseFloat(e.target.value))} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Posición Y</span>
+                      <input type="range" min={0} max={1} step={0.01} value={offsetY} onChange={(e) => setOffsetY(parseFloat(e.target.value))} />
+                    </div>
+                  </div>
+
                   <div className="mt-3 grid grid-cols-2 gap-3">
                     {files.map((pf, idx) => (
                       <div key={idx} className="relative group">
                         <div className="overflow-hidden rounded-xl border">
-                          <div className={pf.file.type.startsWith("image/") ? (aspect === '16:9' ? "aspect-[16/9]" : "aspect-square") : "aspect-[16/9]"}>
+                          <div className={pf.file.type.startsWith("image/") ? (aspect === '4:5' ? "relative aspect-[4/5]" : "relative aspect-square") : "relative aspect-[4/5]"}>
                             {pf.file.type.startsWith("image/") ? (
-                              <img src={pf.url} alt={pf.file.name} className="w-full h-full object-cover" />
+                              <Image src={pf.url} alt={pf.file.name} fill className="object-cover" sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                             ) : (
                               <video src={pf.url} className="w-full h-full object-cover" />
                             )}
