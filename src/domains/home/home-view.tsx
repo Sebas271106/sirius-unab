@@ -2,153 +2,15 @@
 
 import { useEffect, useState } from "react"
 import { supabase } from "@/../app/supabaseClient"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Plus, Sparkles, Heart, MessageCircle, Share2, Bookmark, MoreHorizontal } from "lucide-react"
-import { Textarea } from "@/components/ui/textarea"
+import { Sparkles } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { PostCard } from "./components/post-card"
+import { StoriesStrip } from "./components/stories-strip"
+import { Composer } from "./components/composer"
 
-interface PostCardProps {
-  id: string
-  author: string
-  role: string
-  avatar: string
-  timestamp: string
-  content: string
-  likes: number
-  comments: number
-  media?: { url: string; mime_type: string }[]
-  likedByMe?: boolean
-  onToggleLike?: (postId: string) => void
-  onShare?: (postId: string) => void
-  onToggleComment?: (postId: string) => void
-  onSubmitComment?: (postId: string, text: string) => void
-  commentOpen?: boolean
-  commentText?: string
-  setCommentText?: (v: string) => void
-  commentsList?: { id: any; author: string; avatar: string; timestamp: string; content: string }[]
-}
-
-function PostCard({ id, author, role, avatar, timestamp, content, likes, comments, media = [], likedByMe, onToggleLike, onShare, onToggleComment, onSubmitComment, commentOpen, commentText = "", setCommentText, commentsList = [] }: PostCardProps) {
-  return (
-    <article className="bg-card rounded-2xl border hover:border-muted shadow-sm hover:shadow-md transition-shadow p-4 mb-0">
-      <div className="flex gap-3">
-        <Avatar className="h-9 w-9 flex-shrink-0">
-          <AvatarImage src={avatar || "/placeholder.svg"} alt={author} />
-          <AvatarFallback className="bg-[#ff9800] text-white text-sm">
-            {author
-              .split(" ")
-              .map((n) => n[0])
-              .join("")}
-          </AvatarFallback>
-        </Avatar>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-medium text-sm hover:underline">{author}</span>
-              <span className="text-muted-foreground text-xs">·</span>
-              <span className="text-muted-foreground text-xs">{role}</span>
-              <span className="text-muted-foreground text-xs">·</span>
-              <span className="text-muted-foreground text-xs">{timestamp}</span>
-            </div>
-            <Button variant="ghost" size="icon" className="h-8 w-8 -mr-2 hover:bg-muted/50">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </div>
-
-          <p className="text-sm leading-relaxed mb-3">{content}</p>
-
-          {media.length > 0 && (
-            <div className="mb-3">
-              <div className="rounded-xl overflow-hidden border">
-                {media.length === 1 ? (
-              media[0].mime_type?.startsWith("image/") ? (
-                <img src={media[0].url} alt="media-0" className="w-full h-auto max-h-[520px] object-contain" />
-              ) : (
-                <video src={media[0].url} controls className="w-full h-auto max-h-[520px]" />
-              )
-            ) : (
-              <div className="grid grid-cols-2 gap-1">
-                {media.map((m, idx) => (
-                  <div key={idx} className="relative">
-                    {m.mime_type.startsWith("image/") ? (
-                      <img src={m.url} alt={`media-${idx}`} className="w-full h-auto max-h-[300px] object-cover" />
-                    ) : (
-                      <video src={m.url} controls className="w-full h-auto max-h-[300px] object-cover" />
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center gap-6 px-1">
-            <button className="flex items-center gap-2 text-muted-foreground hover:text-[#1d9bf0]" onClick={() => onToggleComment && onToggleComment(id)}>
-              <MessageCircle className="h-[18px] w-[18px]" />
-              <span className="text-xs">{comments}</span>
-            </button>
-            <button
-              className={`flex items-center gap-2 ${likedByMe ? "text-red-500" : "text-muted-foreground hover:text-red-500"}`}
-              aria-pressed={likedByMe}
-              onClick={() => onToggleLike && onToggleLike(id)}
-            >
-              <Heart className="h-[18px] w-[18px]" {...(likedByMe ? { fill: "currentColor" } : {})} />
-              <span className="text-xs">{likes}</span>
-            </button>
-            <button className="flex items-center gap-2 text-muted-foreground hover:text-[#00ba7c]" onClick={() => onShare && onShare(id)}>
-              <Share2 className="h-[18px] w-[18px]" />
-            </button>
-            <button className="flex items-center gap-2 text-muted-foreground hover:text-[#ff9800]">
-              <Bookmark className="h-[18px] w-[18px]" />
-            </button>
-          </div>
-
-          {commentOpen && (
-            <div className="mt-3">
-              <Textarea
-                value={commentText}
-                onChange={(e) => setCommentText && setCommentText(e.target.value)}
-                placeholder="Escribe un comentario..."
-                className="min-h-[60px]"
-              />
-              <div className="mt-2 flex justify-end">
-                <Button size="sm" disabled={!commentText?.trim()} onClick={() => onSubmitComment && onSubmitComment(id, commentText || "")}>Comentar</Button>
-              </div>
-              
-              {/* Lista de comentarios */}
-              {commentsList.length > 0 && (
-                <div className="mt-3 space-y-3">
-                  {commentsList.map((c) => (
-                    <div key={c.id} className="flex gap-2">
-                      <Avatar className="h-7 w-7 flex-shrink-0">
-                        <AvatarImage src={c.avatar || "/placeholder.svg"} alt={c.author} />
-                        <AvatarFallback className="bg-[#ff9800] text-white text-[10px]">
-                          {c.author.split(" ").map((n) => n[0]).join("")}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium">{c.author}</span>
-                          <span className="text-[11px] text-muted-foreground">{c.timestamp}</span>
-                        </div>
-                        <p className="text-[13px] mt-0.5">{c.content}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </article>
-  )
-}
-
+// PostCard ahora está modularizado en ./components/post-card
 const formatRelativeTime = (isoDate: string) => {
   const diffMs = Date.now() - new Date(isoDate).getTime()
   const diffSec = Math.floor(diffMs / 1000)
@@ -161,16 +23,9 @@ const formatRelativeTime = (isoDate: string) => {
   return `${diffDay}d`
 }
 
-const stories = [
-  { id: 1, name: "Your Story", avatar: "/placeholder.svg?height=40&width=40", isOwn: true },
-  { id: 2, name: "Engineering", avatar: "/placeholder.svg?height=40&width=40" },
-  { id: 3, name: "Student Life", avatar: "/placeholder.svg?height=40&width=40" },
-  { id: 4, name: "Sports", avatar: "/placeholder.svg?height=40&width=40" },
-  { id: 5, name: "Library", avatar: "/placeholder.svg?height=40&width=40" },
-]
-
+// StoriesStrip maneja internamente los stories
 export default function HomeView() {
-  const [posts, setPosts] = useState<Array<{id: any, author: string, role: string, avatar: string, timestamp: string, content: string, likes: number, comments: number, media?: { url: string; mime_type: string }[]}>>([])
+  const [posts, setPosts] = useState<Array<{id: string, author: string, role: string, avatar: string, timestamp: string, content: string, likes: number, comments: number, media?: { url: string; mime_type: string }[]}>>([])
   const [loading, setLoading] = useState<boolean>(true)
   const { toast } = useToast()
   const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set())
@@ -195,7 +50,7 @@ export default function HomeView() {
       if (authorIds.length > 0) {
         const { data: profiles, error: profileErr } = await supabase
           .from("users")
-          .select("id, full_name, career")
+          .select("id, full_name, career, email")
           .in("id", authorIds)
         if (profileErr) {
           console.error("Error cargando perfiles:", profileErr.message)
@@ -204,6 +59,25 @@ export default function HomeView() {
             acc[prof.id] = prof
             return acc
           }, {})
+        }
+      }
+      // Enriquecer perfiles faltantes con la API server-side (service role)
+      const missingAuthorIds = authorIds.filter((id) => !profilesById[id])
+      if (missingAuthorIds.length > 0) {
+        try {
+          const res = await fetch('/api/user-profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: missingAuthorIds })
+          })
+          if (res.ok) {
+            const { profiles } = await res.json()
+            for (const p of profiles || []) {
+              profilesById[p.id] = { ...(profilesById[p.id] || {}), ...p }
+            }
+          }
+        } catch (e) {
+          console.error('Error enriqueciendo perfiles:', e)
         }
       }
       // Fetch media for posts
@@ -229,8 +103,8 @@ export default function HomeView() {
       const mapped = (postsData || []).map(p => {
         const prof = profilesById[p.author_id] || {}
         return {
-          id: p.id,
-          author: prof.full_name || "Usuario",
+          id: String(p.id),
+          author: prof.full_name || (prof.email ? String(prof.email).split("@")[0] : "Usuario"),
           role: prof.career || "",
           avatar: "",
           timestamp: formatRelativeTime(p.created_at),
@@ -304,7 +178,7 @@ export default function HomeView() {
     if (authorIds.length > 0) {
       const { data: profs } = await supabase
         .from("users")
-        .select("id, full_name")
+        .select("id, full_name, email")
         .in("id", authorIds)
       
       profilesById = (profs || []).reduce((acc: any, p: any) => { 
@@ -312,10 +186,29 @@ export default function HomeView() {
         return acc 
       }, {})
     }
+    // Enriquecer perfiles faltantes con la API server-side (service role)
+    const missingIds = authorIds.filter((id) => !profilesById[id])
+    if (missingIds.length > 0) {
+      try {
+        const res = await fetch('/api/user-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: missingIds })
+        })
+        if (res.ok) {
+          const { profiles } = await res.json()
+          for (const p of profiles || []) {
+            profilesById[p.id] = { ...(profilesById[p.id] || {}), ...p }
+          }
+        }
+      } catch (e) {
+        console.error('Error enriqueciendo perfiles (comments):', e)
+      }
+    }
     
     const mapped = (rows || []).map(r => ({
       id: r.id,
-      author: profilesById[r.author_id]?.full_name || "Usuario",
+      author: profilesById[r.author_id]?.full_name || (profilesById[r.author_id]?.email ? String(profilesById[r.author_id].email).split("@")[0] : "Usuario"),
       avatar: "",
       timestamp: formatRelativeTime(r.created_at),
       content: r.content,
@@ -364,8 +257,8 @@ export default function HomeView() {
     
     // Añadir el comentario al hilo visible inmediatamente
     try {
-      const { data: me } = await supabase.from("users").select("full_name").eq("id", userId).single()
-      const authorName = me?.full_name || "Tú"
+      const { data: me } = await supabase.from("users").select("full_name, email").eq("id", userId).single()
+      const authorName = me?.full_name || (me?.email ? String(me.email).split("@")[0] : "Tú")
       
       const newComment = { 
         id: Date.now(), // ID temporal hasta recargar
@@ -477,7 +370,7 @@ export default function HomeView() {
   return (
     <div className="min-h-screen">
       <div className="container">
-        <main className="border-x border-border min-h-screen">
+        <main className="lg:border-x lg:border-border min-h-screen">
           {/* Tabs estilo X.com */}
           <div className="border-b border-border">
             <Tabs defaultValue="para-ti" className="w-full">
@@ -486,31 +379,7 @@ export default function HomeView() {
                 <TabsTrigger value="siguiendo" className="flex-1 py-3">Siguiendo</TabsTrigger>
               </TabsList>
               <TabsContent value="para-ti" className="p-0">
-                {/* Stories */}
-                <div className="border-b border-border p-4">
-                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                    {stories.map((story) => (
-                      <button key={story.id} className="flex flex-col items-center gap-1 flex-shrink-0 group">
-                        <div
-                          className={`relative ${
-                            story.isOwn ? "ring-2 ring-[#ff9800]" : "ring-2 ring-muted hover:ring-[#ff9800]"
-                          } rounded-full p-0.5 transition-all`}
-                        >
-                          <Avatar className="h-14 w-14">
-                            <AvatarImage src={story.avatar || "/placeholder.svg"} alt={story.name} />
-                            <AvatarFallback>{story.name[0]}</AvatarFallback>
-                          </Avatar>
-                          {story.isOwn && (
-                            <div className="absolute bottom-0 right-0 h-5 w-5 bg-[#ff9800] rounded-full flex items-center justify-center border-2 border-background">
-                              <Plus className="h-3 w-3 text-white" />
-                            </div>
-                          )}
-                        </div>
-                        <span className="text-xs text-center max-w-[64px] truncate">{story.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <StoriesStrip />
               </TabsContent>
               <TabsContent value="siguiendo" className="p-4 text-sm text-muted-foreground">
                 Próximamente.
@@ -519,17 +388,7 @@ export default function HomeView() {
           </div>
 
           {/* Composer */}
-           <div className="border-b border-border p-3">
-            <div className="flex gap-2">
-              <Avatar className="h-8 w-8">
-                <AvatarImage src="/placeholder.svg?height=40&width=40" alt="You" />
-                <AvatarFallback className="bg-[#ff9800] text-white text-xs">UN</AvatarFallback>
-              </Avatar>
-              <button onClick={() => window.dispatchEvent(new CustomEvent('sirius:openPostModal'))} className="flex-1 text-left px-3 py-2 rounded-full bg-muted hover:bg-accent transition-colors text-muted-foreground text-sm">
-                ¿Qué está pasando en la UNAB?
-              </button>
-            </div>
-          </div>
+          <Composer />
 
           {/* Posts Feed */}
           {loading ? (
