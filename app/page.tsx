@@ -28,6 +28,12 @@ export default function LoginPage() {
     e.preventDefault()
     setIsLoading(true)
 
+    if (!supabase) {
+      toast({ title: "Configuración requerida", description: "Faltan variables de entorno de Supabase" })
+      setIsLoading(false)
+      return
+    }
+
     const domainOk = email.toLowerCase().endsWith("@unab.edu.co")
     if (!domainOk) {
       toast({ title: "Correo inválido", description: "Debes usar tu correo institucional @unab.edu.co" })
